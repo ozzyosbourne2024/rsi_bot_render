@@ -7,13 +7,8 @@ import os
 # =====================
 # TELEGRAM
 # =====================
-# Lokalde test için direkt değer
 TELEGRAM_TOKEN = "8541248285:AAFBU1zNp7wtdrM5tfUh1gsu8or4HiQ1NJc"
 CHAT_ID = "1863652639"
-
-# GitHub Actions için secrets kullan
-# TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-# CHAT_ID = os.getenv("CHAT_ID")
 
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not CHAT_ID:
@@ -22,9 +17,9 @@ def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message}
     try:
-        response = requests.post(url, data=payload)
-        if response.status_code != 200:
-            print("❌ Telegram gönderim hatası:", response.text)
+        r = requests.post(url, data=payload, timeout=10)
+        if r.status_code != 200:
+            print("❌ Telegram gönderim hatası:", r.text)
     except Exception as e:
         print("❌ Telegram gönderim hatası:", e)
 
@@ -33,77 +28,82 @@ def send_telegram(message):
 # =====================
 SYMBOLS = {
     "ALTIN": "GC=F",
-    "GUMUS_FUTURES": "SI=F",     # COMEX Silver Futures
-    "GUMUS_SPOT": "XAGUSD=X",    # Spot Silver (TradingView XAGUSD’ye yakın)
+    "GUMUS_FUTURES": "SI=F",
+    "GUMUS_SPOT": "XAGUSD=X",
     "NDX": "^NDX"
 }
+
 RSI_PERIOD = 14
 LAST_ALERT = {}
 
 # =====================
-# RSI HESAPLAMA (Wilder)
+# RSI (Wilder – TradingView uyumlu)
 # =====================
 def rsi(series, period=14):
     delta = series.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
+
     avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
+
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
+
+def to_float(x):
+    return float(x.iloc[-1]) if isinstance(x, pd.Series) else float(x)
 
 # =====================
 # VERİ ÇEKME
 # =====================
-def to_float(x):
-    if isinstance(x, pd.Series):
-        return float(x.iloc[0])
-    return float(x)
+def fetch(symbol):
+    try:
+        # -------- SPOT GÜMÜŞ --------
+        if symbol == "XAGUSD=X":
+            df_30m = yf.download(symbol, interval="30m", period="10d", progress=False)
+            if df_30m.empty:
+                return None
 
-# Spot silver uses 30m data because 1h is unreliable on Yahoo
-    # SPOT gümüş için farklı interval
-    if symbol == "XAGUSD=X":
-        df = yf.download(symbol, interval="30m", period="10d", progress=False)
-        if df.empty:
+            close_30m = df_30m["Close"]
+            rsi_30m = rsi(close_30m)
+
+            # 4H = 8 adet 30m mum
+            close_4h = close_30m.resample("4H").last()
+            rsi_4h = rsi(close_4h)
+
+            return {
+                "price": to_float(close_30m),
+                "rsi_1h_closed": to_float(rsi_30m.iloc[-2]),
+                "rsi_1h_open": to_float(rsi_30m.iloc[-1]),
+                "rsi_4h_closed": to_float(rsi_4h.iloc[-2]),
+                "rsi_4h_open": to_float(rsi_4h.iloc[-1]),
+            }
+
+        # -------- FUTURES / ENDEKS --------
+        df_1h = yf.download(symbol, interval="1h", period="10d", progress=False)
+        if df_1h.empty:
             return None
 
-        close = df["Close"]
-        rsi_30m = rsi(close)
+        close_1h = df_1h["Close"]
+        rsi_1h = rsi(close_1h)
 
-        # 4H = 8 adet 30m mum
-        df_4h = close.resample("4H").last()
-        rsi_4h = rsi(df_4h)
+        close_4h = close_1h.resample("4H").last()
+        rsi_4h = rsi(close_4h)
 
         return {
-    "price": to_float(close_1h.iloc[-1]),
-    "rsi_1h_closed": to_float(rsi_1h.iloc[-2]),
-    "rsi_1h_open": to_float(rsi_1h.iloc[-1]),
-    "rsi_4h_closed": to_float(rsi_4h.iloc[-2]),
-    "rsi_4h_open": to_float(rsi_4h.iloc[-1]),
-}
+            "price": to_float(close_1h),
+            "rsi_1h_closed": to_float(rsi_1h.iloc[-2]),
+            "rsi_1h_open": to_float(rsi_1h.iloc[-1]),
+            "rsi_4h_closed": to_float(rsi_4h.iloc[-2]),
+            "rsi_4h_open": to_float(rsi_4h.iloc[-1]),
+        }
 
-
-    # Futures & diğerleri
-    df_1h = yf.download(symbol, interval="1h", period="10d", progress=False)
-    if df_1h.empty:
+    except Exception as e:
+        print(f"❌ {symbol} hata:", e)
         return None
 
-    close_1h = df_1h["Close"]
-    rsi_1h = rsi(close_1h)
-
-    df_4h = df_1h.resample("4h", label="right", closed="right").last()
-    rsi_4h = rsi(df_4h["Close"])
-
-    return {
-        "price": float(close_1h.iloc[-1]),
-        "rsi_1h_closed": float(rsi_1h.iloc[-2]),
-        "rsi_1h_open": float(rsi_1h.iloc[-1]),
-        "rsi_4h_closed": float(rsi_4h.iloc[-2]),
-        "rsi_4h_open": float(rsi_4h.iloc[-1]),
-    }
-
 # =====================
-# ALARM KONTROL
+# ALARM
 # =====================
 def check_alarm(name, rsi_val):
     prev = LAST_ALERT.get(name)
@@ -111,12 +111,15 @@ def check_alarm(name, rsi_val):
     if rsi_val < 30 and prev != "LOW":
         LAST_ALERT[name] = "LOW"
         return f"🔴 {name} RSI < 30 ({rsi_val:.2f})"
+
     if 45 < rsi_val <= 50 and prev != "MID":
         LAST_ALERT[name] = "MID"
         return f"🟠 {name} RSI 45–50 ({rsi_val:.2f})"
+
     if rsi_val > 50 and prev != "HIGH":
         LAST_ALERT[name] = "HIGH"
         return f"🟢 {name} RSI > 50 ({rsi_val:.2f})"
+
     return None
 
 # =====================
@@ -129,7 +132,7 @@ def send_report():
     for name, symbol in SYMBOLS.items():
         data = fetch(symbol)
         if not data:
-            text += f"{name}: Veri alınamadı!\n"
+            text += f"\n{name}: ❌ Veri alınamadı\n"
             continue
 
         alarm = check_alarm(name, data["rsi_4h_closed"])
@@ -148,23 +151,22 @@ Açık  : {data['rsi_4h_open']:.2f}
 """
 
         if alarm:
-            text += f"\n🚨 ALARM: {alarm}\n"
+            text += f"\n🚨 {alarm}\n"
 
     print(text)
     send_telegram(text)
 
 # =====================
-# MANUEL TEST MESAJI (GitHub Actions veya test için)
+# TEST
 # =====================
 def send_test_message():
-    send_telegram("✅ GitHub Actions test mesajı!")
+    send_telegram("✅ RSI bot test mesajı")
 
 # =====================
-# Script doğrudan çalıştırıldığında
+# MAIN
 # =====================
 if __name__ == "__main__":
     import sys
-    # Eğer 'test' argümanı varsa test mesajı gönder
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         send_test_message()
     else:
