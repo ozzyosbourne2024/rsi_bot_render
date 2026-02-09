@@ -1,0 +1,36 @@
+name: RSI Bot Hourly
+
+# Ne zaman çalışacak
+on:
+  schedule:
+    - cron: '0 * * * *'  # Her saat başı
+  workflow_dispatch:     # Manuel tetikleme de mümkün
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Repo'yu çek
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Python ayarla
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      # Gereksinimleri yükle
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Botu çalıştır
+      - name: Run RSI Bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python app_render.py
