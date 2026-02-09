@@ -56,6 +56,7 @@ def rsi(series, period=14):
 # VERİ ÇEKME
 # =====================
 def fetch(symbol):
+# Spot silver uses 30m data because 1h is unreliable on Yahoo
     # SPOT gümüş için farklı interval
     if symbol == "XAGUSD=X":
         df = yf.download(symbol, interval="30m", period="10d", progress=False)
@@ -95,31 +96,6 @@ def fetch(symbol):
         "rsi_4h_closed": float(rsi_4h.iloc[-2]),
         "rsi_4h_open": float(rsi_4h.iloc[-1]),
     }
-🧪 BU NE SAĞLAR?
-✅ GUMUS_SPOT (XAGUSD=X) artık veri alır
-
-✅ 4H RSI → TradingView’a çok daha yakın
-
-✅ Futures bozulmaz
-
-✅ GitHub Actions’ta da sorunsuz
-
-Spot gümüş Yahoo’da 1H yok → 30m’den 4H türetmek en doğru yöntem.
-
-🔚 SON ADIM
-git add app_render.py
-git commit -m "Fix Spot Silver using 30m data for 4H RSI"
-git push origin main
-İstersen bir sonraki adımda:
-
-TradingView RSI ile otomatik fark karşılaştırma
-
-“Spot–Futures RSI farkı > X ise alarm”
-
-Sadece 4H kapalı mum alarmı (en temiz sinyal)
-
-hangisini istiyorsun, söyle 🔥
-
 
 # =====================
 # ALARM KONTROL
