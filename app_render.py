@@ -1,28 +1,26 @@
-import time
-import schedule
 import yfinance as yf
 import pandas as pd
 import requests
 from datetime import datetime, timezone as tz
 
 # =====================
-# TELEGRAM
+# TELEGRAM (Lokal test)
 # =====================
-import os
-
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+TELEGRAM_TOKEN = "8541248285:AAFBU1zNp7wtdrM5tfUh1gsu8or4HiQ1NJc"
+CHAT_ID = "1863652639"
 
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("Telegram token veya chat ID eksik!")
+        print("❌ Telegram token veya chat ID eksik!")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message}
     try:
-        requests.post(url, data=payload)
+        response = requests.post(url, data=payload)
+        if response.status_code != 200:
+            print("❌ Telegram gönderim hatası:", response.text)
     except Exception as e:
-        print("Telegram gönderim hatası:", e)
+        print("❌ Telegram gönderim hatası:", e)
 
 # =====================
 # AYARLAR
@@ -35,20 +33,6 @@ SYMBOLS = {
 
 RSI_PERIOD = 14
 LAST_ALERT = {}
-
-# =====================
-# YARDIMCI FONKSİYONLAR
-# =====================
-def arrow(curr, prev):
-    try:
-        if curr > prev:
-            return "⬆️"
-        elif curr < prev:
-            return "⬇️"
-        else:
-            return "➡️"
-    except:
-        return "❓"
 
 # =====================
 # RSI HESAPLAMA (Wilder)
@@ -76,7 +60,6 @@ def fetch(symbol):
     df_4h = df_1h.resample("4h", label="right", closed="right").last()
     rsi_4h = rsi(df_4h["Close"])
 
-    # Güvenli float dönüşümü
     def safe_float(val):
         return val.item() if isinstance(val, pd.Series) else float(val)
 
@@ -140,14 +123,8 @@ Açık  : {data['rsi_4h_open']:.2f}
     send_telegram(text)
 
 # =====================
-# SCHEDULE (GitHub Actions'ta çalışırken gerek yok)
-# =====================
-# Eğer manuel veya cron tetiklenecekse, schedule ve while loop gerekmez.
-#send_report()
-#while True:
-#    schedule.run_pending()
-#    time.sleep(1)
-
 # Script doğrudan çalıştırıldığında rapor gönder
+# =====================
 if __name__ == "__main__":
     send_report()
+
