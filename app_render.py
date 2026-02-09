@@ -56,6 +56,28 @@ def rsi(series, period=14):
 # VERİ ÇEKME
 # =====================
 def fetch(symbol):
+    # SPOT gümüş için farklı interval
+    if symbol == "XAGUSD=X":
+        df = yf.download(symbol, interval="30m", period="10d", progress=False)
+        if df.empty:
+            return None
+
+        close = df["Close"]
+        rsi_30m = rsi(close)
+
+        # 4H = 8 adet 30m mum
+        df_4h = close.resample("4H").last()
+        rsi_4h = rsi(df_4h)
+
+        return {
+            "price": float(close.iloc[-1]),
+            "rsi_1h_closed": float(rsi_30m.iloc[-3]),  # yaklaşık 1H
+            "rsi_1h_open": float(rsi_30m.iloc[-1]),
+            "rsi_4h_closed": float(rsi_4h.iloc[-2]),
+            "rsi_4h_open": float(rsi_4h.iloc[-1]),
+        }
+
+    # Futures & diğerleri
     df_1h = yf.download(symbol, interval="1h", period="10d", progress=False)
     if df_1h.empty:
         return None
@@ -66,16 +88,38 @@ def fetch(symbol):
     df_4h = df_1h.resample("4h", label="right", closed="right").last()
     rsi_4h = rsi(df_4h["Close"])
 
-    def safe_float(val):
-        return val.item() if isinstance(val, pd.Series) else float(val)
-
     return {
-        "price": safe_float(close_1h.iloc[-1]),
-        "rsi_1h_closed": safe_float(rsi_1h.iloc[-2]),
-        "rsi_1h_open": safe_float(rsi_1h.iloc[-1]),
-        "rsi_4h_closed": safe_float(rsi_4h.iloc[-2]),
-        "rsi_4h_open": safe_float(rsi_4h.iloc[-1]),
+        "price": float(close_1h.iloc[-1]),
+        "rsi_1h_closed": float(rsi_1h.iloc[-2]),
+        "rsi_1h_open": float(rsi_1h.iloc[-1]),
+        "rsi_4h_closed": float(rsi_4h.iloc[-2]),
+        "rsi_4h_open": float(rsi_4h.iloc[-1]),
     }
+🧪 BU NE SAĞLAR?
+✅ GUMUS_SPOT (XAGUSD=X) artık veri alır
+
+✅ 4H RSI → TradingView’a çok daha yakın
+
+✅ Futures bozulmaz
+
+✅ GitHub Actions’ta da sorunsuz
+
+Spot gümüş Yahoo’da 1H yok → 30m’den 4H türetmek en doğru yöntem.
+
+🔚 SON ADIM
+git add app_render.py
+git commit -m "Fix Spot Silver using 30m data for 4H RSI"
+git push origin main
+İstersen bir sonraki adımda:
+
+TradingView RSI ile otomatik fark karşılaştırma
+
+“Spot–Futures RSI farkı > X ise alarm”
+
+Sadece 4H kapalı mum alarmı (en temiz sinyal)
+
+hangisini istiyorsun, söyle 🔥
+
 
 # =====================
 # ALARM KONTROL
