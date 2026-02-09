@@ -33,10 +33,10 @@ def send_telegram(message):
 # =====================
 SYMBOLS = {
     "ALTIN": "GC=F",
-    "GUMUS": "SI=F",
+    "GUMUS_FUTURES": "SI=F",     # COMEX Silver Futures
+    "GUMUS_SPOT": "XAGUSD=X",    # Spot Silver (TradingView XAGUSD’ye yakın)
     "NDX": "^NDX"
 }
-
 RSI_PERIOD = 14
 LAST_ALERT = {}
 
