@@ -2,12 +2,17 @@ import yfinance as yf
 import pandas as pd
 import requests
 from datetime import datetime, timezone as tz
+import os
 
 # =====================
-# TELEGRAM (Lokal test)
+# TELEGRAM (Secrets + Direkt Token/Chat ID)
 # =====================
-TELEGRAM_TOKEN = "8541248285:AAFBU1zNp7wtdrM5tfUh1gsu8or4HiQ1NJc"
-CHAT_ID = "1863652639"
+LOCAL_TELEGRAM_TOKEN = "8541248285:AAFBU1zNp7wtdrM5tfUh1gsu8or4HiQ1NJc"
+LOCAL_CHAT_ID = "1863652639"
+
+# GitHub Actions secrets varsa kullan, yoksa local token
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", LOCAL_TELEGRAM_TOKEN)
+CHAT_ID = os.getenv("CHAT_ID", LOCAL_CHAT_ID)
 
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not CHAT_ID:
@@ -127,4 +132,3 @@ Açık  : {data['rsi_4h_open']:.2f}
 # =====================
 if __name__ == "__main__":
     send_report()
-
