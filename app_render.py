@@ -55,7 +55,11 @@ def rsi(series, period=14):
 # =====================
 # VERİ ÇEKME
 # =====================
-def fetch(symbol):
+def to_float(x):
+    if isinstance(x, pd.Series):
+        return float(x.iloc[0])
+    return float(x)
+
 # Spot silver uses 30m data because 1h is unreliable on Yahoo
     # SPOT gümüş için farklı interval
     if symbol == "XAGUSD=X":
@@ -71,12 +75,13 @@ def fetch(symbol):
         rsi_4h = rsi(df_4h)
 
         return {
-            "price": float(close.iloc[-1]),
-            "rsi_1h_closed": float(rsi_30m.iloc[-3]),  # yaklaşık 1H
-            "rsi_1h_open": float(rsi_30m.iloc[-1]),
-            "rsi_4h_closed": float(rsi_4h.iloc[-2]),
-            "rsi_4h_open": float(rsi_4h.iloc[-1]),
-        }
+    "price": to_float(close_1h.iloc[-1]),
+    "rsi_1h_closed": to_float(rsi_1h.iloc[-2]),
+    "rsi_1h_open": to_float(rsi_1h.iloc[-1]),
+    "rsi_4h_closed": to_float(rsi_4h.iloc[-2]),
+    "rsi_4h_open": to_float(rsi_4h.iloc[-1]),
+}
+
 
     # Futures & diğerleri
     df_1h = yf.download(symbol, interval="1h", period="10d", progress=False)
