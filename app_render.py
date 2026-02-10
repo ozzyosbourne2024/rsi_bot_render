@@ -3,7 +3,7 @@ import schedule
 import yfinance as yf
 import pandas as pd
 import requests
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 # =====================
 # TELEGRAM
@@ -15,7 +15,7 @@ def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message}
     try:
-        requests.post(url, data=payload)
+        requests.post(url, data=payload, timeout=10)
     except Exception as e:
         print("Telegram gönderim hatası:", e)
 
@@ -61,25 +61,34 @@ def rsi(series, period=14):
 # VERİ ÇEKME
 # =====================
 def fetch(symbol):
-    df_1h = yf.download(symbol, interval="1h", period="10d", progress=False)
-    if df_1h.empty:
+    try:
+        df_1h = yf.download(symbol, interval="1h", period="10d", progress=False)
+        if df_1h.empty:
+            return None
+
+        close_1h = df_1h["Close"]
+        rsi_1h = rsi(close_1h)
+
+        df_4h = df_1h.resample("4h", label="right", closed="right").last()
+        rsi_4h = rsi(df_4h["Close"])
+
+        # Güvenli float dönüşümleri
+        price = float(close_1h.values[-1]) if not pd.isna(close_1h.values[-1]) else 0.0
+        rsi_1h_closed = float(rsi_1h.values[-2]) if len(rsi_1h) >= 2 and not pd.isna(rsi_1h.values[-2]) else 0.0
+        rsi_1h_open = float(rsi_1h.values[-1]) if not pd.isna(rsi_1h.values[-1]) else 0.0
+        rsi_4h_closed = float(rsi_4h.values[-2]) if len(rsi_4h) >= 2 and not pd.isna(rsi_4h.values[-2]) else 0.0
+        rsi_4h_open = float(rsi_4h.values[-1]) if not pd.isna(rsi_4h.values[-1]) else 0.0
+
+        return {
+            "price": price,
+            "rsi_1h_closed": rsi_1h_closed,
+            "rsi_1h_open": rsi_1h_open,
+            "rsi_4h_closed": rsi_4h_closed,
+            "rsi_4h_open": rsi_4h_open,
+        }
+    except Exception as e:
+        print(f"{symbol} veri çekme hatası:", e)
         return None
-
-    # 1H RSI
-    close_1h = df_1h["Close"]
-    rsi_1h = rsi(close_1h)
-
-    # 4H RSI (1h verisinden oluşturuldu)
-    df_4h = df_1h.resample("4h", label="right", closed="right").last()
-    rsi_4h = rsi(df_4h["Close"])
-
-    return {
-        "price": float(close_1h.iloc[-1]),
-        "rsi_1h_closed": float(rsi_1h.iloc[-2]),
-        "rsi_1h_open": float(rsi_1h.iloc[-1]),
-        "rsi_4h_closed": float(rsi_4h.iloc[-2]),
-        "rsi_4h_open": float(rsi_4h.iloc[-1]),
-    }
 
 # =====================
 # ALARM KONTROL
@@ -102,7 +111,7 @@ def check_alarm(name, rsi_val):
 # RAPOR
 # =====================
 def send_report():
-    now = datetime.now(UTC).strftime("%H:%M UTC")
+    now = datetime.now(timezone.utc).strftime("%H:%M UTC")
     text = f"📊 RSI RAPOR | {now}\n"
 
     for name, symbol in SYMBOLS.items():
@@ -142,9 +151,6 @@ schedule.every().day.at("13:00").do(send_report)
 schedule.every().day.at("15:00").do(send_report)
 schedule.every().day.at("18:30").do(send_report)
 schedule.every().day.at("21:00").do(send_report)
-
-for h in range(8, 18):
-    schedule.every().day.at(f"{h:02d}:00").do(send_report)
 
 # TEST
 schedule.every(1).minutes.do(send_report)
