@@ -43,14 +43,17 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # =====================
-# VERİ ÇEKME (retry ve delay)
+# VERİ ÇEKME (retry, delay, 429 kontrol)
 # =====================
-def fetch(symbol, retries=2, wait=5):
+def fetch(symbol, retries=3, wait=5):
     for attempt in range(retries):
         try:
             df_1h = yf.download(symbol, interval="1h", period="10d", progress=False)
+            
+            # 429 durumu kontrolü
             if df_1h.empty:
-                message = f"{symbol}: Veri alınamadı, {attempt+1}. deneme..."
+                # Eğer download status 429 olsaydı, yfinance genellikle boş DataFrame döndürür
+                message = f"{symbol}: Veri alınamadı veya rate-limit (429), {attempt+1}. deneme..."
                 print(message)
                 send_telegram(f"⚠️ {message}")
                 time.sleep(wait)
@@ -79,6 +82,9 @@ def fetch(symbol, retries=2, wait=5):
             print(message)
             send_telegram(f"❌ {message}")
             time.sleep(wait)
+
+    # Tüm denemeler başarısız olursa Telegram uyarısı
+    send_telegram(f"⚠️ {symbol}: Veri alınamadı tüm denemelerde, 429 olabilir.")
     return None
 
 # =====================
@@ -106,7 +112,7 @@ def send_report():
     text = f"📊 RSI RAPOR | {now}\n"
 
     for name, symbol in SYMBOLS.items():
-        data = fetch(symbol, retries=2, wait=5)
+        data = fetch(symbol, retries=3, wait=5)
         if not data:
             text += f"{name}: Veri alınamadı!\n"
         else:
