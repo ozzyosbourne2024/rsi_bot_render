@@ -1,5 +1,4 @@
 import time
-import schedule
 import yfinance as yf
 import pandas as pd
 import requests
@@ -32,21 +31,7 @@ RSI_PERIOD = 14
 LAST_ALERT = {}
 
 # =====================
-# YARDIMCI FONKSİYONLAR
-# =====================
-def arrow(curr, prev):
-    try:
-        if curr > prev:
-            return "⬆️"
-        elif curr < prev:
-            return "⬇️"
-        else:
-            return "➡️"
-    except:
-        return "❓"
-
-# =====================
-# RSI HESAPLAMA (Wilder)
+# RSI HESAPLAMA
 # =====================
 def rsi(series, period=14):
     delta = series.diff()
@@ -58,7 +43,7 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # =====================
-# VERİ ÇEKME (Retry ile, yalnızca log)
+# VERİ ÇEKME (GitHub için tek seferlik)
 # =====================
 def fetch(symbol, retries=2, wait=2):
     for attempt in range(retries):
@@ -75,7 +60,6 @@ def fetch(symbol, retries=2, wait=2):
             df_4h = df_1h.resample("4h", label="right", closed="right").last()
             rsi_4h = rsi(df_4h["Close"])
 
-            # Güvenli float dönüşümleri
             price = float(close_1h.values[-1]) if not pd.isna(close_1h.values[-1]) else 0.0
             rsi_1h_closed = float(rsi_1h.values[-2]) if len(rsi_1h) >= 2 and not pd.isna(rsi_1h.values[-2]) else 0.0
             rsi_1h_open = float(rsi_1h.values[-1]) if not pd.isna(rsi_1h.values[-1]) else 0.0
@@ -146,21 +130,7 @@ Açık  : {data['rsi_4h_open']:.2f}
     send_telegram(text)
 
 # =====================
-# SCHEDULE
+# GitHub Actions için tek seferlik çalıştır
 # =====================
-schedule.every().day.at("06:00").do(send_report)
-schedule.every().day.at("08:00").do(send_report)
-schedule.every().day.at("11:00").do(send_report)
-schedule.every().day.at("13:00").do(send_report)
-schedule.every().day.at("15:00").do(send_report)
-schedule.every().day.at("18:30").do(send_report)
-schedule.every().day.at("21:00").do(send_report)
-
-print("✅ RSI BOT TAM KONSOLİDE ÇALIŞIYOR")
-
-# Başlangıçta raporu gönder
-send_report()
-
-while True:
-    schedule.run_pending()
-    time.sleep(1)
+if __name__ == "__main__":
+    send_report()
