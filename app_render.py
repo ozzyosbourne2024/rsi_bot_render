@@ -58,9 +58,9 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # =====================
-# VERİ ÇEKME (Retry ile)
+# VERİ ÇEKME (Retry ile, yalnızca log)
 # =====================
-def fetch(symbol, retries=3, wait=5):
+def fetch(symbol, retries=2, wait=2):
     for attempt in range(retries):
         try:
             df_1h = yf.download(symbol, interval="1h", period="10d", progress=False)
@@ -119,7 +119,7 @@ def send_report():
     text = f"📊 RSI RAPOR | {now}\n"
 
     for name, symbol in SYMBOLS.items():
-        data = fetch(symbol, retries=3, wait=5)
+        data = fetch(symbol, retries=2, wait=2)
         if not data:
             text += f"{name}: Veri alınamadı!\n"
             continue
@@ -156,12 +156,9 @@ schedule.every().day.at("15:00").do(send_report)
 schedule.every().day.at("18:30").do(send_report)
 schedule.every().day.at("21:00").do(send_report)
 
-# TEST (1 dakikada bir rapor)
-schedule.every(1).minutes.do(send_report)
-
 print("✅ RSI BOT TAM KONSOLİDE ÇALIŞIYOR")
 
-# Başlangıçta test raporu gönder
+# Başlangıçta raporu gönder
 send_report()
 
 while True:
