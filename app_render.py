@@ -43,28 +43,29 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # =====================
-# VERİ ÇEKME (GitHub için tek seferlik)
+# VERİ ÇEKME (retry ve delay)
 # =====================
-def fetch(symbol, retries=2, wait=2):
+def fetch(symbol, retries=2, wait=5):
     for attempt in range(retries):
         try:
             df_1h = yf.download(symbol, interval="1h", period="10d", progress=False)
             if df_1h.empty:
-                print(f"{symbol}: Veri alınamadı, {attempt+1}. deneme...")
+                message = f"{symbol}: Veri alınamadı, {attempt+1}. deneme..."
+                print(message)
+                send_telegram(f"⚠️ {message}")
                 time.sleep(wait)
                 continue
 
             close_1h = df_1h["Close"]
             rsi_1h = rsi(close_1h)
-
             df_4h = df_1h.resample("4h", label="right", closed="right").last()
             rsi_4h = rsi(df_4h["Close"])
 
-            price = float(close_1h.values[-1]) if not pd.isna(close_1h.values[-1]) else 0.0
-            rsi_1h_closed = float(rsi_1h.values[-2]) if len(rsi_1h) >= 2 and not pd.isna(rsi_1h.values[-2]) else 0.0
-            rsi_1h_open = float(rsi_1h.values[-1]) if not pd.isna(rsi_1h.values[-1]) else 0.0
-            rsi_4h_closed = float(rsi_4h.values[-2]) if len(rsi_4h) >= 2 and not pd.isna(rsi_4h.values[-2]) else 0.0
-            rsi_4h_open = float(rsi_4h.values[-1]) if not pd.isna(rsi_4h.values[-1]) else 0.0
+            price = float(close_1h.values[-1].item()) if not pd.isna(close_1h.values[-1]) else 0.0
+            rsi_1h_closed = float(rsi_1h.values[-2].item()) if len(rsi_1h) >= 2 and not pd.isna(rsi_1h.values[-2]) else 0.0
+            rsi_1h_open = float(rsi_1h.values[-1].item()) if not pd.isna(rsi_1h.values[-1]) else 0.0
+            rsi_4h_closed = float(rsi_4h.values[-2].item()) if len(rsi_4h) >= 2 and not pd.isna(rsi_4h.values[-2]) else 0.0
+            rsi_4h_open = float(rsi_4h.values[-1].item()) if not pd.isna(rsi_4h.values[-1]) else 0.0
 
             return {
                 "price": price,
@@ -74,7 +75,9 @@ def fetch(symbol, retries=2, wait=2):
                 "rsi_4h_open": rsi_4h_open,
             }
         except Exception as e:
-            print(f"{symbol} veri çekme hatası: {e}, {attempt+1}. deneme")
+            message = f"{symbol} veri çekme hatası: {e}, {attempt+1}. deneme"
+            print(message)
+            send_telegram(f"❌ {message}")
             time.sleep(wait)
     return None
 
@@ -103,14 +106,12 @@ def send_report():
     text = f"📊 RSI RAPOR | {now}\n"
 
     for name, symbol in SYMBOLS.items():
-        data = fetch(symbol, retries=2, wait=2)
+        data = fetch(symbol, retries=2, wait=5)
         if not data:
             text += f"{name}: Veri alınamadı!\n"
-            continue
-
-        alarm = check_alarm(name, data["rsi_4h_closed"])
-
-        text += f"""
+        else:
+            alarm = check_alarm(name, data["rsi_4h_closed"])
+            text += f"""
 {name}
 Fiyat: {data['price']:.2f}
 
@@ -122,15 +123,17 @@ Açık  : {data['rsi_1h_open']:.2f}
 Kapalı: {data['rsi_4h_closed']:.2f}
 Açık  : {data['rsi_4h_open']:.2f}
 """
+            if alarm:
+                text += f"\n🚨 ALARM: {alarm}\n"
 
-        if alarm:
-            text += f"\n🚨 ALARM: {alarm}\n"
+        # Semboller arası 5 saniye delay ile rate-limit kontrol
+        time.sleep(5)
 
     print(text)
     send_telegram(text)
 
 # =====================
-# GitHub Actions için tek seferlik çalıştır
+# Tek seferlik çalıştır
 # =====================
 if __name__ == "__main__":
     send_report()
