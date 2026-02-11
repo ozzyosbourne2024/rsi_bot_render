@@ -192,7 +192,7 @@ Açık  : {data['rsi_4h_open']:.2f}
 # =====================
 # ANA ÇALIŞMA
 # =====================
-TEST_MODE = False  # True: hemen rapor / False: sadece zamanlama geçerli
+TEST_MODE = True  # True: hemen rapor / False: sadece zamanlama geçerli
 
 if __name__ == "__main__":
     if TEST_MODE:
