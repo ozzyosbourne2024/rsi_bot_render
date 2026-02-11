@@ -108,7 +108,7 @@ def check_alarm(name, rsi_val):
 # RAPOR
 # =====================
 def send_report():
-    now = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    now = datetime.now().strftime("%H:%M TR")
     text = f"📊 RSI RAPOR | {now}\n"
 
     for name, symbol in SYMBOLS.items():
@@ -143,3 +143,23 @@ Açık  : {data['rsi_4h_open']:.2f}
 # =====================
 if __name__ == "__main__":
     send_report()
+
+# =====================
+# RAPOR SAATLERİ (Türkiye saati)
+# =====================
+REPORT_TIMES = [
+    "08:05","09:05","10:05","11:05",
+    "13:00","14:05","15:05","16:05",
+    "18:00","19:05","21:05","22:00"
+]
+
+# =====================
+# ZAMAN KONTROLLÜ TEK ÇALIŞMA
+# =====================
+if __name__ == "__main__":
+    now = datetime.now().strftime("%H:%M")
+
+    if now in REPORT_TIMES:
+        send_report()
+    else:
+        print("Rapor saati değil. Çıkılıyor.")
