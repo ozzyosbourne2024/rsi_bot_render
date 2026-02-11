@@ -3,11 +3,10 @@ import yfinance as yf
 import pandas as pd
 import requests
 from datetime import datetime
-import schedule  # pip install schedule
+import schedule
+from concurrent.futures import ThreadPoolExecutor
 
-# =====================
-# TELEGRAM
-# =====================
+# ===================== TELEGRAM =====================
 TELEGRAM_TOKEN = "8541248285:AAFBU1zNp7wtdrM5tfUh1gsu8or4HiQ1NJc"
 CHAT_ID = "1863652639"
 
@@ -16,38 +15,19 @@ def send_telegram(message):
     payload = {"chat_id": CHAT_ID, "text": message}
     try:
         requests.post(url, data=payload, timeout=10)
+        print("[INFO] Telegram gönderildi.")
     except Exception as e:
-        print("Telegram gönderim hatası:", e)
+        print("[ERROR] Telegram gönderim hatası:", e)
 
-# =====================
-# RSI TAKİP EDİLENLER
-# =====================
-SYMBOLS = {
-    "ALTIN": "GC=F",
-    "GUMUS": "SI=F",
-    "NASDAQ100": "^NDX"
-}
-
-# =====================
-# HİSSE TAKİP
-# =====================
+# ===================== Semboller ve Hisseler =====================
+SYMBOLS = {"ALTIN":"GC=F","GUMUS":"SI=F","NASDAQ100":"^NDX"}
 STOCKS = {
-    "BIST100": "XU100.IS",
-    "ASELSAN": "ASELS.IS",
-    "BIMAS": "BIMAS.IS",
-    "THYAO": "THYAO.IS",
-    "TUPRS": "TUPRS.IS",
-    "KCHOL": "KCHOL.IS",
-    "MIGROS": "MGROS.IS",
-    "AKBANK": "AKBNK.IS",
-    "GARANTI": "GARAN.IS",
-    "EMLAK_GYO": "EKGYO.IS",
-    "ZIRAAT_GYO": "ZRGYO.IS"
+    "BIST100":"XU100.IS","ASELSAN":"ASELS.IS","BIMAS":"BIMAS.IS","THYAO":"THYAO.IS",
+    "TUPRS":"TUPRS.IS","KCHOL":"KCHOL.IS","MIGROS":"MGROS.IS","AKBANK":"AKBNK.IS",
+    "GARANTI":"GARAN.IS","EMLAK_GYO":"EKGYO.IS","ZIRAAT_GYO":"ZRGYO.IS"
 }
 
-# =====================
-# RSI
-# =====================
+# ===================== RSI Hesaplama =====================
 def rsi(series, period=14):
     delta = series.diff()
     gain = delta.clip(lower=0)
@@ -57,77 +37,107 @@ def rsi(series, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-# =====================
-# RSI TOPLU ÇEKİM (TEK SEFER)
-# =====================
-def fetch_all_rsi():
-    tickers = list(SYMBOLS.values())
-    df = yf.download(
-        tickers,
-        interval="1h",
-        period="7d",
-        group_by="ticker",
-        progress=False,
-        threads=False
-    )
-    results = {}
-    for name, symbol in SYMBOLS.items():
+# ===================== Safe download =====================
+def safe_download(symbol, interval="1h", period="7d", retries=3):
+    for i in range(retries):
         try:
-            data = df[symbol].dropna()
-            close_1h = data["Close"]
+            df = yf.download(symbol, interval=interval, period=period, progress=False, threads=False)
+            if not df.empty:
+                time.sleep(1)
+                return df
+        except Exception as e:
+            print(f"[ERROR] {symbol} download hatası ({i+1}/{retries}): {e}")
+        time.sleep(2)
+    return None
+
+# ===================== RSI paralel çekim =====================
+def fetch_rsi_for(symbol_tuple):
+    name, symbol = symbol_tuple
+    for attempt in range(3):
+        data = safe_download(symbol, interval="1h", period="7d")
+        if data is None or data.empty:
+            print(f"[WARN] {name} verisi boş, {attempt+1}. deneme...")
+            time.sleep(2)
+            continue
+
+        close_1h = data["Close"]
+        if isinstance(close_1h.columns, pd.MultiIndex):
+            # Eğer multiindex ise, sembol ile eşleşen sütunu al, yoksa ilk sütun
+            if symbol in close_1h.columns.get_level_values(0):
+                close_1h = close_1h[symbol]
+            else:
+                close_1h = close_1h.iloc[:,0]
+        close_1h = close_1h.astype(float)
+
+        try:
+            price = round(float(close_1h.iloc[-1]),2)
+            print(f"[INFO] {name} fiyat alındı: {price}")
+            df_4h = close_1h.resample("4h").last()
             rsi_1h = rsi(close_1h)
-            df_4h = data.resample("4h").last()
-            rsi_4h = rsi(df_4h["Close"])
-            results[name] = {
-                "price": float(close_1h.iloc[-1]),
-                "rsi_1h_closed": float(rsi_1h.iloc[-2]),
-                "rsi_1h_open": float(rsi_1h.iloc[-1]),
-                "rsi_4h_closed": float(rsi_4h.iloc[-2]),
-                "rsi_4h_open": float(rsi_4h.iloc[-1]),
-            }
-        except:
-            results[name] = None
-    return results
+            rsi_4h = rsi(df_4h)
+            return (name, {
+                "price": price,
+                "rsi_1h_closed": round(float(rsi_1h.iloc[-2]),2),
+                "rsi_1h_open": round(float(rsi_1h.iloc[-1]),2),
+                "rsi_4h_closed": round(float(rsi_4h.iloc[-2]),2),
+                "rsi_4h_open": round(float(rsi_4h.iloc[-1]),2)
+            })
+        except Exception as e:
+            print(f"[ERROR] {name} RSI hesap hatası: {e}")
+            time.sleep(1)
+    return (name, None)
 
-# =====================
-# HİSSE TOPLU ÇEKİM
-# =====================
-def fetch_all_stocks():
-    tickers = list(STOCKS.values())
-    df = yf.download(
-        tickers,
-        period="2d",
-        interval="1d",
-        group_by="ticker",
-        progress=False,
-        threads=False
-    )
+def fetch_all_rsi():
     results = {}
-    for name, symbol in STOCKS.items():
-        try:
-            data = df[symbol].dropna()
-            last = data["Close"].iloc[-1]
-            prev = data["Close"].iloc[-2]
-            change = ((last - prev) / prev) * 100
-            results[name] = (round(last, 2), round(change, 2))
-        except:
-            results[name] = (None, None)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        for name, data in executor.map(fetch_rsi_for, SYMBOLS.items()):
+            results[name] = data
     return results
 
-# =====================
-# RAPOR
-# =====================
+# ===================== Hisse paralel çekim =====================
+def fetch_stock_for(symbol_tuple):
+    name, symbol = symbol_tuple
+    data = safe_download(symbol, interval="1d", period="2d")
+    if data is None or data.empty:
+        return (name, (None,None))
+    try:
+        close = data["Close"]
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:,0]
+        last = round(close.iloc[-1].item(), 2)
+        prev = round(close.iloc[-2].item(), 2)
+        change = round((last-prev)/prev*100,2)
+        print(f"[INFO] {name} hisse verisi: {last}, değişim: {change}%")
+        return (name, (last, change))
+    except Exception as e:
+        print(f"[ERROR] {name} hisse verisi hesap hatası: {e}")
+        return (name, (None,None))
+
+def fetch_all_stocks():
+    results = {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        for name, data in executor.map(fetch_stock_for, STOCKS.items()):
+            results[name] = data
+    return results
+
+# ===================== Güvenli sıralama =====================
+def safe_change(val):
+    if val is None:
+        return -9999
+    return float(val)
+
+# ===================== Rapor oluşturma =====================
 def send_report():
     now = datetime.now().strftime("%H:%M TR")
     text = f"📊 RSI RAPOR | {now}\n"
+
     rsi_data = fetch_all_rsi()
     for name in SYMBOLS.keys():
         data = rsi_data.get(name)
         if not data:
             text += f"\n{name}: Veri alınamadı!\n"
             continue
-        text += f"""
-{name}
+        text += f"""{name}
 Fiyat: {data['price']:.2f}
 
 1H RSI
@@ -138,43 +148,36 @@ Açık  : {data['rsi_1h_open']:.2f}
 Kapalı: {data['rsi_4h_closed']:.2f}
 Açık  : {data['rsi_4h_open']:.2f}
 """
+
     text += "\n📈 HİSSE RAPORU (% DEĞİŞİM SIRALI)\n"
     stock_data = fetch_all_stocks()
     bist = stock_data.get("BIST100")
-    others = [(k, v[0], v[1]) for k, v in stock_data.items() if k != "BIST100"]
-    others.sort(key=lambda x: (x[2] is not None, x[2]), reverse=True)
+    others = [(k,v[0],v[1]) for k,v in stock_data.items() if k!="BIST100"]
+    others.sort(key=lambda x: safe_change(x[2]), reverse=True)
+
     if bist:
         price, change = bist
-        if price:
-            emoji = "🟢" if change > 0 else "🔴"
+        if price is not None:
+            emoji = "🟢" if change>0 else "🔴"
             text += f"\n{emoji} BIST100\nFiyat: {price}\nDeğişim: {change}%\n"
+
     for name, price, change in others:
         if price is None:
             text += f"\n{name}: Veri alınamadı\n"
         else:
-            emoji = "🟢" if change > 0 else "🔴"
+            emoji = "🟢" if change>0 else "🔴"
             text += f"\n{emoji} {name}\nFiyat: {price}\nDeğişim: {change}%\n"
-    print(text)
+
+    print("[INFO] Telegram gönderiliyor...")
     send_telegram(text)
 
-# =====================
-# ZAMANLAMA (schedule)
-# =====================
-# Günlük raporlar
-schedule.every().day.at("06:00").do(send_report)
-schedule.every().day.at("18:30").do(send_report)
-schedule.every().day.at("21:00").do(send_report)
+# ===================== Zamanlama =====================
+for hour in range(8, 22):  # 08:00–21:00
+    for day in ['monday','tuesday','wednesday','thursday','friday']:
+        getattr(schedule.every(), day).at(f"{hour:02d}:30").do(send_report)
 
-# Hafta içi saat başı raporlar (08:00–17:00)
-for hour in range(8, 18):  # 08:00–17:00
-    schedule.every().monday.at(f"{hour:02d}:00").do(send_report)
-    schedule.every().tuesday.at(f"{hour:02d}:00").do(send_report)
-    schedule.every().wednesday.at(f"{hour:02d}:00").do(send_report)
-    schedule.every().thursday.at(f"{hour:02d}:00").do(send_report)
-    schedule.every().friday.at(f"{hour:02d}:00").do(send_report)
-
-print("⏰ RSI rapor zamanlaması başlatıldı...")
+print("[INFO] RSI rapor zamanlaması başlatıldı...")
 
 while True:
     schedule.run_pending()
-    time.sleep(30)  # 30 saniyede bir kontrol
+    time.sleep(10)
