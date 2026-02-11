@@ -1,25 +1,32 @@
-name: RSI Cron Job
+name: RSI Scheduled Reports
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # her 5 dakikada bir test
-  workflow_dispatch:        # manuel çalıştırma butonu
+    # 06:00 TR → 03:00 UTC
+    - cron: "0 3 * * *"
+    # 08:00–17:00 TR arası her saat başı → UTC 05:00–14:00
+    - cron: "0 5-14 * * *"
+    # 18:30 TR → 15:30 UTC
+    - cron: "30 15 * * *"
+    # 21:00 TR → 18:00 UTC
+    - cron: "0 18 * * *"
+  workflow_dispatch:  # manuel çalıştırma butonu
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Repo çek
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Python kur
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      - name: Paketleri yükle
+      - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Script çalıştır
+      - name: Run RSI script
         run: python app_render.py
