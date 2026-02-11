@@ -19,13 +19,31 @@ def send_telegram(message):
         print("Telegram gönderim hatası:", e)
 
 # =====================
-# AYARLAR
+# RSI TAKİP EDİLENLER
 # =====================
 SYMBOLS = {
     "ALTIN": "GC=F",
     "GUMUS": "SI=F",
-    "NDX": "^NDX"
+    "NASDAQ100": "^NDX"
 }
+
+# =====================
+# HİSSE TAKİP
+# =====================
+STOCKS = {
+   "BIST100": "XU100.IS",
+    "ASELSAN": "ASELS.IS",
+    "BIMAS": "BIMAS.IS",
+    "THYAO": "THYAO.IS",
+    "TUPRS": "TUPRS.IS",
+    "KCHOL": "KCHOL.IS",
+    "MIGROS": "MGROS.IS",
+    "AKBANK": "AKBNK.IS",
+    "GARANTI": "GARAN.IS",
+    "EMLAK_GYO": "EKGYO.IS",
+    "ZIRAAT_GYO": "ZRGYO.IS"
+}
+
 
 RSI_PERIOD = 14
 LAST_ALERT = {}
@@ -43,66 +61,57 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # =====================
-# VERİ ÇEKME (retry, delay, 429 kontrol)
+# RSI VERİ ÇEKME
 # =====================
 def fetch(symbol, retries=3, wait=5):
     for attempt in range(retries):
         try:
-            df_1h = yf.download(symbol, interval="1h", period="10d", progress=False)
-            
-            # 429 durumu kontrolü
+            df_1h = yf.download(symbol, interval="1h", period="7d", progress=False)
+
             if df_1h.empty:
-                # Eğer download status 429 olsaydı, yfinance genellikle boş DataFrame döndürür
-                message = f"{symbol}: Veri alınamadı veya rate-limit (429), {attempt+1}. deneme..."
-                print(message)
-                send_telegram(f"⚠️ {message}")
                 time.sleep(wait)
                 continue
 
             close_1h = df_1h["Close"]
             rsi_1h = rsi(close_1h)
+
             df_4h = df_1h.resample("4h", label="right", closed="right").last()
             rsi_4h = rsi(df_4h["Close"])
 
-            price = float(close_1h.values[-1].item()) if not pd.isna(close_1h.values[-1]) else 0.0
-            rsi_1h_closed = float(rsi_1h.values[-2].item()) if len(rsi_1h) >= 2 and not pd.isna(rsi_1h.values[-2]) else 0.0
-            rsi_1h_open = float(rsi_1h.values[-1].item()) if not pd.isna(rsi_1h.values[-1]) else 0.0
-            rsi_4h_closed = float(rsi_4h.values[-2].item()) if len(rsi_4h) >= 2 and not pd.isna(rsi_4h.values[-2]) else 0.0
-            rsi_4h_open = float(rsi_4h.values[-1].item()) if not pd.isna(rsi_4h.values[-1]) else 0.0
+            price = float(close_1h.values[-1].item())
 
             return {
                 "price": price,
-                "rsi_1h_closed": rsi_1h_closed,
-                "rsi_1h_open": rsi_1h_open,
-                "rsi_4h_closed": rsi_4h_closed,
-                "rsi_4h_open": rsi_4h_open,
+                "rsi_1h_closed": float(rsi_1h.values[-2]),
+                "rsi_1h_open": float(rsi_1h.values[-1]),
+                "rsi_4h_closed": float(rsi_4h.values[-2]),
+                "rsi_4h_open": float(rsi_4h.values[-1]),
             }
+
         except Exception as e:
-            message = f"{symbol} veri çekme hatası: {e}, {attempt+1}. deneme"
-            print(message)
-            send_telegram(f"❌ {message}")
             time.sleep(wait)
 
-    # Tüm denemeler başarısız olursa Telegram uyarısı
-    send_telegram(f"⚠️ {symbol}: Veri alınamadı tüm denemelerde, 429 olabilir.")
     return None
 
 # =====================
-# ALARM KONTROL
+# HİSSE VERİ ÇEKME (HAFİF)
 # =====================
-def check_alarm(name, rsi_val):
-    prev = LAST_ALERT.get(name)
+def fetch_stock(symbol):
+    try:
+        ticker = yf.Ticker(symbol)
+        data = ticker.fast_info
 
-    if rsi_val < 30 and prev != "LOW":
-        LAST_ALERT[name] = "LOW"
-        return f"🔴 {name} RSI < 30 ({rsi_val:.2f})"
-    if 45 < rsi_val <= 50 and prev != "MID":
-        LAST_ALERT[name] = "MID"
-        return f"🟠 {name} RSI 45–50 ({rsi_val:.2f})"
-    if rsi_val > 50 and prev != "HIGH":
-        LAST_ALERT[name] = "HIGH"
-        return f"🟢 {name} RSI > 50 ({rsi_val:.2f})"
-    return None
+        last_price = data.get("lastPrice")
+        previous_close = data.get("previousClose")
+
+        if last_price and previous_close:
+            change_pct = ((last_price - previous_close) / previous_close) * 100
+            return round(last_price, 2), round(change_pct, 2)
+
+    except Exception as e:
+        print(symbol, "hisse hatası:", e)
+
+    return None, None
 
 # =====================
 # RAPOR
@@ -111,12 +120,13 @@ def send_report():
     now = datetime.now().strftime("%H:%M TR")
     text = f"📊 RSI RAPOR | {now}\n"
 
+    # -------- RSI KISMI --------
     for name, symbol in SYMBOLS.items():
-        data = fetch(symbol, retries=3, wait=5)
+        data = fetch(symbol)
+
         if not data:
             text += f"{name}: Veri alınamadı!\n"
         else:
-            alarm = check_alarm(name, data["rsi_4h_closed"])
             text += f"""
 {name}
 Fiyat: {data['price']:.2f}
@@ -129,37 +139,65 @@ Açık  : {data['rsi_1h_open']:.2f}
 Kapalı: {data['rsi_4h_closed']:.2f}
 Açık  : {data['rsi_4h_open']:.2f}
 """
-            if alarm:
-                text += f"\n🚨 ALARM: {alarm}\n"
 
-        # Semboller arası 5 saniye delay ile rate-limit kontrol
-        time.sleep(5)
+        time.sleep(3)
+
+    # -------- HİSSE KISMI --------
+    text += "\n📈 HİSSE RAPORU\n"
+
+     # -------- HİSSE KISMI --------
+    text += "\n📈 HİSSE RAPORU (% DEĞİŞİM SIRALI)\n"
+
+    bist_data = None
+    other_stocks = []
+
+    # verileri çek
+    for name, symbol in STOCKS.items():
+        price, change = fetch_stock(symbol)
+        time.sleep(3)
+
+        if name == "BIST100":
+            bist_data = (name, price, change)
+        else:
+            other_stocks.append((name, price, change))
+
+    # diğer hisseleri değişime göre sırala (büyükten küçüğe)
+    other_stocks.sort(
+        key=lambda x: (x[2] is not None, x[2]),
+        reverse=True
+    )
+
+    # 1️⃣ BIST100 en üstte
+    if bist_data:
+        name, price, change = bist_data
+        if price is None:
+            text += f"\n{name}: Veri alınamadı\n"
+        else:
+            emoji = "🟢" if change > 0 else "🔴"
+            text += f"""
+{emoji} {name}
+Fiyat: {price}
+Değişim: {change}%
+"""
+
+    # 2️⃣ Diğer hisseler sıralı
+    for name, price, change in other_stocks:
+        if price is None:
+            text += f"\n{name}: Veri alınamadı\n"
+        else:
+            emoji = "🟢" if change > 0 else "🔴"
+            text += f"""
+{emoji} {name}
+Fiyat: {price}
+Değişim: {change}%
+"""
+
 
     print(text)
     send_telegram(text)
 
 # =====================
-# Tek seferlik çalıştır
+# ÇALIŞTIR
 # =====================
 if __name__ == "__main__":
     send_report()
-
-# =====================
-# RAPOR SAATLERİ (Türkiye saati)
-# =====================
-REPORT_TIMES = [
-    "08:05","09:05","10:05","11:05",
-    "13:00","14:05","15:05","16:05",
-    "18:00","19:05","21:05","22:00"
-]
-
-# =====================
-# ZAMAN KONTROLLÜ TEK ÇALIŞMA
-# =====================
-if __name__ == "__main__":
-    now = datetime.now().strftime("%H:%M")
-
-    if now in REPORT_TIMES:
-        send_report()
-    else:
-        print("Rapor saati değil. Çıkılıyor.")
