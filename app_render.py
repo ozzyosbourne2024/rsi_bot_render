@@ -12,7 +12,10 @@ CHAT_ID = "1863652639"
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message}
-    requests.post(url, data=payload, timeout=10)
+    try:
+        requests.post(url, data=payload, timeout=10)
+    except Exception as e:
+        print("Telegram gönderim hatası:", e)
 
 # =====================
 # TAKİP
@@ -37,6 +40,9 @@ STOCKS = {
     "ZIRAAT_GYO": "ZRGYO.IS"
 }
 
+# =====================
+# RSI HESAPLAMA
+# =====================
 def rsi(series, period=14):
     delta = series.diff()
     gain = delta.clip(lower=0)
@@ -46,10 +52,14 @@ def rsi(series, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
+# =====================
+# RAPOR
+# =====================
 def send_report():
     now = datetime.now().strftime("%H:%M TR")
     text = f"📊 RSI RAPOR | {now}\n"
 
+    # 1H ve 4H RSI
     df = yf.download(
         list(SYMBOLS.values()),
         interval="1h",
@@ -62,15 +72,20 @@ def send_report():
     for name, symbol in SYMBOLS.items():
         try:
             data = df[symbol].dropna()
-            close = data["Close"]
-            rsi_val = rsi(close)
-            price = close.iloc[-1]
-            text += f"\n{name}\nFiyat: {price:.2f}\nRSI(1H): {rsi_val.iloc[-1]:.2f}\n"
+            close_1h = data["Close"]
+            rsi_1h = rsi(close_1h)
+            df_4h = data.resample("4h").last()
+            rsi_4h = rsi(df_4h["Close"])
+            price = close_1h.iloc[-1]
+
+            text += f"\n{name}\nFiyat: {price:.2f}\n"
+            text += f"RSI 1H: {rsi_1h.iloc[-1]:.2f}\n"
+            text += f"RSI 4H: {rsi_4h.iloc[-1]:.2f}\n"
         except:
             text += f"\n{name}: Veri alınamadı\n"
 
+    # Hisse raporu
     text += "\n📈 HİSSE RAPORU\n"
-
     df2 = yf.download(
         list(STOCKS.values()),
         period="2d",
