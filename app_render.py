@@ -2,6 +2,7 @@ import yfinance as yf
 import pandas as pd
 import requests
 from datetime import datetime
+import pytz  # TR saat için
 
 # =====================
 # TELEGRAM
@@ -11,9 +12,8 @@ CHAT_ID = "1863652639"
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message}
     try:
-        requests.post(url, data=payload, timeout=10)
+        requests.post(url, data={"chat_id": CHAT_ID, "text": message}, timeout=10)
     except Exception as e:
         print("Telegram gönderim hatası:", e)
 
@@ -56,7 +56,8 @@ def rsi(series, period=14):
 # RAPOR
 # =====================
 def send_report():
-    now = datetime.now().strftime("%H:%M TR")
+    tz = pytz.timezone("Europe/Istanbul")
+    now = datetime.now(tz).strftime("%H:%M TR")  # TR saatine göre
     text = f"📊 RSI RAPOR | {now}\n"
 
     # 1H ve 4H RSI
