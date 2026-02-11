@@ -1,8 +1,9 @@
+import time
 import yfinance as yf
 import pandas as pd
 import requests
 from datetime import datetime
-import pytz  # TR saat için
+import schedule  # pip install schedule
 
 # =====================
 # TELEGRAM
@@ -12,13 +13,14 @@ CHAT_ID = "1863652639"
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": message}
     try:
-        requests.post(url, data={"chat_id": CHAT_ID, "text": message}, timeout=10)
+        requests.post(url, data=payload, timeout=10)
     except Exception as e:
         print("Telegram gönderim hatası:", e)
 
 # =====================
-# TAKİP
+# RSI TAKİP EDİLENLER
 # =====================
 SYMBOLS = {
     "ALTIN": "GC=F",
@@ -26,6 +28,9 @@ SYMBOLS = {
     "NASDAQ100": "^NDX"
 }
 
+# =====================
+# HİSSE TAKİP
+# =====================
 STOCKS = {
     "BIST100": "XU100.IS",
     "ASELSAN": "ASELS.IS",
@@ -41,7 +46,7 @@ STOCKS = {
 }
 
 # =====================
-# RSI HESAPLAMA
+# RSI
 # =====================
 def rsi(series, period=14):
     delta = series.diff()
@@ -53,23 +58,19 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # =====================
-# RAPOR
+# RSI TOPLU ÇEKİM (TEK SEFER)
 # =====================
-def send_report():
-    tz = pytz.timezone("Europe/Istanbul")
-    now = datetime.now(tz).strftime("%H:%M TR")  # TR saatine göre
-    text = f"📊 RSI RAPOR | {now}\n"
-
-    # 1H ve 4H RSI
+def fetch_all_rsi():
+    tickers = list(SYMBOLS.values())
     df = yf.download(
-        list(SYMBOLS.values()),
+        tickers,
         interval="1h",
         period="7d",
         group_by="ticker",
         progress=False,
         threads=False
     )
-
+    results = {}
     for name, symbol in SYMBOLS.items():
         try:
             data = df[symbol].dropna()
@@ -77,38 +78,103 @@ def send_report():
             rsi_1h = rsi(close_1h)
             df_4h = data.resample("4h").last()
             rsi_4h = rsi(df_4h["Close"])
-            price = close_1h.iloc[-1]
-
-            text += f"\n{name}\nFiyat: {price:.2f}\n"
-            text += f"RSI 1H: {rsi_1h.iloc[-1]:.2f}\n"
-            text += f"RSI 4H: {rsi_4h.iloc[-1]:.2f}\n"
+            results[name] = {
+                "price": float(close_1h.iloc[-1]),
+                "rsi_1h_closed": float(rsi_1h.iloc[-2]),
+                "rsi_1h_open": float(rsi_1h.iloc[-1]),
+                "rsi_4h_closed": float(rsi_4h.iloc[-2]),
+                "rsi_4h_open": float(rsi_4h.iloc[-1]),
+            }
         except:
-            text += f"\n{name}: Veri alınamadı\n"
+            results[name] = None
+    return results
 
-    # Hisse raporu
-    text += "\n📈 HİSSE RAPORU\n"
-    df2 = yf.download(
-        list(STOCKS.values()),
+# =====================
+# HİSSE TOPLU ÇEKİM
+# =====================
+def fetch_all_stocks():
+    tickers = list(STOCKS.values())
+    df = yf.download(
+        tickers,
         period="2d",
         interval="1d",
         group_by="ticker",
         progress=False,
         threads=False
     )
-
+    results = {}
     for name, symbol in STOCKS.items():
         try:
-            data = df2[symbol].dropna()
+            data = df[symbol].dropna()
             last = data["Close"].iloc[-1]
             prev = data["Close"].iloc[-2]
             change = ((last - prev) / prev) * 100
-            emoji = "🟢" if change > 0 else "🔴"
-            text += f"\n{emoji} {name}\nFiyat: {last:.2f}\nDeğişim: {change:.2f}%\n"
+            results[name] = (round(last, 2), round(change, 2))
         except:
-            text += f"\n{name}: Veri alınamadı\n"
+            results[name] = (None, None)
+    return results
 
+# =====================
+# RAPOR
+# =====================
+def send_report():
+    now = datetime.now().strftime("%H:%M TR")
+    text = f"📊 RSI RAPOR | {now}\n"
+    rsi_data = fetch_all_rsi()
+    for name in SYMBOLS.keys():
+        data = rsi_data.get(name)
+        if not data:
+            text += f"\n{name}: Veri alınamadı!\n"
+            continue
+        text += f"""
+{name}
+Fiyat: {data['price']:.2f}
+
+1H RSI
+Kapalı: {data['rsi_1h_closed']:.2f}
+Açık  : {data['rsi_1h_open']:.2f}
+
+4H RSI
+Kapalı: {data['rsi_4h_closed']:.2f}
+Açık  : {data['rsi_4h_open']:.2f}
+"""
+    text += "\n📈 HİSSE RAPORU (% DEĞİŞİM SIRALI)\n"
+    stock_data = fetch_all_stocks()
+    bist = stock_data.get("BIST100")
+    others = [(k, v[0], v[1]) for k, v in stock_data.items() if k != "BIST100"]
+    others.sort(key=lambda x: (x[2] is not None, x[2]), reverse=True)
+    if bist:
+        price, change = bist
+        if price:
+            emoji = "🟢" if change > 0 else "🔴"
+            text += f"\n{emoji} BIST100\nFiyat: {price}\nDeğişim: {change}%\n"
+    for name, price, change in others:
+        if price is None:
+            text += f"\n{name}: Veri alınamadı\n"
+        else:
+            emoji = "🟢" if change > 0 else "🔴"
+            text += f"\n{emoji} {name}\nFiyat: {price}\nDeğişim: {change}%\n"
     print(text)
     send_telegram(text)
 
-if __name__ == "__main__":
-    send_report()
+# =====================
+# ZAMANLAMA (schedule)
+# =====================
+# Günlük raporlar
+schedule.every().day.at("06:00").do(send_report)
+schedule.every().day.at("18:30").do(send_report)
+schedule.every().day.at("21:00").do(send_report)
+
+# Hafta içi saat başı raporlar (08:00–17:00)
+for hour in range(8, 18):  # 08:00–17:00
+    schedule.every().monday.at(f"{hour:02d}:00").do(send_report)
+    schedule.every().tuesday.at(f"{hour:02d}:00").do(send_report)
+    schedule.every().wednesday.at(f"{hour:02d}:00").do(send_report)
+    schedule.every().thursday.at(f"{hour:02d}:00").do(send_report)
+    schedule.every().friday.at(f"{hour:02d}:00").do(send_report)
+
+print("⏰ RSI rapor zamanlaması başlatıldı...")
+
+while True:
+    schedule.run_pending()
+    time.sleep(30)  # 30 saniyede bir kontrol
