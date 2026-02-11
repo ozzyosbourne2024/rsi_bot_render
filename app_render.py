@@ -1,8 +1,8 @@
-import time
 import yfinance as yf
 import pandas as pd
 import requests
 from datetime import datetime
+import time  # test gecikmesi için
 
 # =====================
 # TELEGRAM
@@ -45,7 +45,7 @@ STOCKS = {
 }
 
 # =====================
-# RSI
+# RSI HESAPLAMA
 # =====================
 def rsi(series, period=14):
     delta = series.diff()
@@ -57,11 +57,10 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # =====================
-# RSI TOPLU ÇEKİM (TEK SEFER)
+# RSI TOPLU ÇEKİM
 # =====================
 def fetch_all_rsi():
     tickers = list(SYMBOLS.values())
-
     df = yf.download(
         tickers,
         interval="1h",
@@ -70,19 +69,14 @@ def fetch_all_rsi():
         progress=False,
         threads=False
     )
-
     results = {}
-
     for name, symbol in SYMBOLS.items():
         try:
             data = df[symbol].dropna()
             close_1h = data["Close"]
-
             rsi_1h = rsi(close_1h)
-
             df_4h = data.resample("4h").last()
             rsi_4h = rsi(df_4h["Close"])
-
             results[name] = {
                 "price": float(close_1h.iloc[-1]),
                 "rsi_1h_closed": float(rsi_1h.iloc[-2]),
@@ -90,10 +84,8 @@ def fetch_all_rsi():
                 "rsi_4h_closed": float(rsi_4h.iloc[-2]),
                 "rsi_4h_open": float(rsi_4h.iloc[-1]),
             }
-
         except:
             results[name] = None
-
     return results
 
 # =====================
@@ -101,7 +93,6 @@ def fetch_all_rsi():
 # =====================
 def fetch_all_stocks():
     tickers = list(STOCKS.values())
-
     df = yf.download(
         tickers,
         period="2d",
@@ -110,9 +101,7 @@ def fetch_all_stocks():
         progress=False,
         threads=False
     )
-
     results = {}
-
     for name, symbol in STOCKS.items():
         try:
             data = df[symbol].dropna()
@@ -122,11 +111,36 @@ def fetch_all_stocks():
             results[name] = (round(last, 2), round(change, 2))
         except:
             results[name] = (None, None)
-
     return results
 
 # =====================
-# RAPOR
+# ZAMAN KONTROLÜ
+# =====================
+def should_send_report():
+    now = datetime.now()
+    hour = now.hour
+    minute = now.minute
+    weekday = now.weekday()  # 0=Mon, 6=Sun
+
+    # Hafta içi (Pzt-Cum)
+    if weekday < 5:
+        if (hour == 6 and minute == 0) or \
+           (8 <= hour <= 17 and minute == 0) or \
+           (hour == 18 and minute == 30) or \
+           (hour == 21 and minute == 0):
+            return True
+
+    # Hafta sonu (Cmt-Paz)
+    else:
+        if (hour == 6 and minute == 0) or \
+           (hour == 18 and minute == 30) or \
+           (hour == 21 and minute == 0):
+            return True
+
+    return False
+
+# =====================
+# RAPOR GÖNDERME
 # =====================
 def send_report():
     now = datetime.now().strftime("%H:%M TR")
@@ -134,14 +148,11 @@ def send_report():
 
     # RSI
     rsi_data = fetch_all_rsi()
-
     for name in SYMBOLS.keys():
         data = rsi_data.get(name)
-
         if not data:
             text += f"\n{name}: Veri alınamadı!\n"
             continue
-
         text += f"""
 {name}
 Fiyat: {data['price']:.2f}
@@ -155,24 +166,19 @@ Kapalı: {data['rsi_4h_closed']:.2f}
 Açık  : {data['rsi_4h_open']:.2f}
 """
 
-    # HİSSELER
+    # Hisseler
     text += "\n📈 HİSSE RAPORU (% DEĞİŞİM SIRALI)\n"
-
     stock_data = fetch_all_stocks()
-
     bist = stock_data.get("BIST100")
     others = [(k, v[0], v[1]) for k, v in stock_data.items() if k != "BIST100"]
-
     others.sort(key=lambda x: (x[2] is not None, x[2]), reverse=True)
 
-    # BIST100 en üstte
     if bist:
         price, change = bist
-        if price:
+        if price is not None:
             emoji = "🟢" if change > 0 else "🔴"
             text += f"\n{emoji} BIST100\nFiyat: {price}\nDeğişim: {change}%\n"
 
-    # Diğerleri
     for name, price, change in others:
         if price is None:
             text += f"\n{name}: Veri alınamadı\n"
@@ -184,5 +190,16 @@ Açık  : {data['rsi_4h_open']:.2f}
     send_telegram(text)
 
 # =====================
+# ANA ÇALIŞMA
+# =====================
+TEST_MODE = False  # True: hemen rapor / False: sadece zamanlama geçerli
+
 if __name__ == "__main__":
-    send_report()
+    if TEST_MODE:
+        print("⚡ TEST MODU: 1 dakika sonra test raporu gönderilecek...")
+        time.sleep(60)
+        send_report()
+    elif should_send_report():
+        send_report()
+    else:
+        print("Şu an zamanlama dışında, rapor gönderilmiyor.")
