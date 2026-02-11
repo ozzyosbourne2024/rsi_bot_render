@@ -2,7 +2,7 @@ import time
 import yfinance as yf
 import pandas as pd
 import requests
-from datetime import datetime, timezone
+from datetime import datetime
 
 # =====================
 # TELEGRAM
@@ -31,7 +31,7 @@ SYMBOLS = {
 # HİSSE TAKİP
 # =====================
 STOCKS = {
-   "BIST100": "XU100.IS",
+    "BIST100": "XU100.IS",
     "ASELSAN": "ASELS.IS",
     "BIMAS": "BIMAS.IS",
     "THYAO": "THYAO.IS",
@@ -44,12 +44,8 @@ STOCKS = {
     "ZIRAAT_GYO": "ZRGYO.IS"
 }
 
-
-RSI_PERIOD = 14
-LAST_ALERT = {}
-
 # =====================
-# RSI HESAPLAMA
+# RSI
 # =====================
 def rsi(series, period=14):
     delta = series.diff()
@@ -61,57 +57,73 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # =====================
-# RSI VERİ ÇEKME
+# RSI TOPLU ÇEKİM (TEK SEFER)
 # =====================
-def fetch(symbol, retries=3, wait=5):
-    for attempt in range(retries):
+def fetch_all_rsi():
+    tickers = list(SYMBOLS.values())
+
+    df = yf.download(
+        tickers,
+        interval="1h",
+        period="7d",
+        group_by="ticker",
+        progress=False,
+        threads=False
+    )
+
+    results = {}
+
+    for name, symbol in SYMBOLS.items():
         try:
-            df_1h = yf.download(symbol, interval="1h", period="7d", progress=False)
+            data = df[symbol].dropna()
+            close_1h = data["Close"]
 
-            if df_1h.empty:
-                time.sleep(wait)
-                continue
-
-            close_1h = df_1h["Close"]
             rsi_1h = rsi(close_1h)
 
-            df_4h = df_1h.resample("4h", label="right", closed="right").last()
+            df_4h = data.resample("4h").last()
             rsi_4h = rsi(df_4h["Close"])
 
-            price = float(close_1h.values[-1].item())
-
-            return {
-                "price": price,
-                "rsi_1h_closed": float(rsi_1h.values[-2]),
-                "rsi_1h_open": float(rsi_1h.values[-1]),
-                "rsi_4h_closed": float(rsi_4h.values[-2]),
-                "rsi_4h_open": float(rsi_4h.values[-1]),
+            results[name] = {
+                "price": float(close_1h.iloc[-1]),
+                "rsi_1h_closed": float(rsi_1h.iloc[-2]),
+                "rsi_1h_open": float(rsi_1h.iloc[-1]),
+                "rsi_4h_closed": float(rsi_4h.iloc[-2]),
+                "rsi_4h_open": float(rsi_4h.iloc[-1]),
             }
 
-        except Exception as e:
-            time.sleep(wait)
+        except:
+            results[name] = None
 
-    return None
+    return results
 
 # =====================
-# HİSSE VERİ ÇEKME (HAFİF)
+# HİSSE TOPLU ÇEKİM
 # =====================
-def fetch_stock(symbol):
-    try:
-        ticker = yf.Ticker(symbol)
-        data = ticker.fast_info
+def fetch_all_stocks():
+    tickers = list(STOCKS.values())
 
-        last_price = data.get("lastPrice")
-        previous_close = data.get("previousClose")
+    df = yf.download(
+        tickers,
+        period="2d",
+        interval="1d",
+        group_by="ticker",
+        progress=False,
+        threads=False
+    )
 
-        if last_price and previous_close:
-            change_pct = ((last_price - previous_close) / previous_close) * 100
-            return round(last_price, 2), round(change_pct, 2)
+    results = {}
 
-    except Exception as e:
-        print(symbol, "hisse hatası:", e)
+    for name, symbol in STOCKS.items():
+        try:
+            data = df[symbol].dropna()
+            last = data["Close"].iloc[-1]
+            prev = data["Close"].iloc[-2]
+            change = ((last - prev) / prev) * 100
+            results[name] = (round(last, 2), round(change, 2))
+        except:
+            results[name] = (None, None)
 
-    return None, None
+    return results
 
 # =====================
 # RAPOR
@@ -120,14 +132,17 @@ def send_report():
     now = datetime.now().strftime("%H:%M TR")
     text = f"📊 RSI RAPOR | {now}\n"
 
-    # -------- RSI KISMI --------
-    for name, symbol in SYMBOLS.items():
-        data = fetch(symbol)
+    # RSI
+    rsi_data = fetch_all_rsi()
+
+    for name in SYMBOLS.keys():
+        data = rsi_data.get(name)
 
         if not data:
-            text += f"{name}: Veri alınamadı!\n"
-        else:
-            text += f"""
+            text += f"\n{name}: Veri alınamadı!\n"
+            continue
+
+        text += f"""
 {name}
 Fiyat: {data['price']:.2f}
 
@@ -140,64 +155,34 @@ Kapalı: {data['rsi_4h_closed']:.2f}
 Açık  : {data['rsi_4h_open']:.2f}
 """
 
-        time.sleep(3)
-
-    # -------- HİSSE KISMI --------
-    text += "\n📈 HİSSE RAPORU\n"
-
-     # -------- HİSSE KISMI --------
+    # HİSSELER
     text += "\n📈 HİSSE RAPORU (% DEĞİŞİM SIRALI)\n"
 
-    bist_data = None
-    other_stocks = []
+    stock_data = fetch_all_stocks()
 
-    # verileri çek
-    for name, symbol in STOCKS.items():
-        price, change = fetch_stock(symbol)
-        time.sleep(3)
+    bist = stock_data.get("BIST100")
+    others = [(k, v[0], v[1]) for k, v in stock_data.items() if k != "BIST100"]
 
-        if name == "BIST100":
-            bist_data = (name, price, change)
-        else:
-            other_stocks.append((name, price, change))
+    others.sort(key=lambda x: (x[2] is not None, x[2]), reverse=True)
 
-    # diğer hisseleri değişime göre sırala (büyükten küçüğe)
-    other_stocks.sort(
-        key=lambda x: (x[2] is not None, x[2]),
-        reverse=True
-    )
+    # BIST100 en üstte
+    if bist:
+        price, change = bist
+        if price:
+            emoji = "🟢" if change > 0 else "🔴"
+            text += f"\n{emoji} BIST100\nFiyat: {price}\nDeğişim: {change}%\n"
 
-    # 1️⃣ BIST100 en üstte
-    if bist_data:
-        name, price, change = bist_data
+    # Diğerleri
+    for name, price, change in others:
         if price is None:
             text += f"\n{name}: Veri alınamadı\n"
         else:
             emoji = "🟢" if change > 0 else "🔴"
-            text += f"""
-{emoji} {name}
-Fiyat: {price}
-Değişim: {change}%
-"""
-
-    # 2️⃣ Diğer hisseler sıralı
-    for name, price, change in other_stocks:
-        if price is None:
-            text += f"\n{name}: Veri alınamadı\n"
-        else:
-            emoji = "🟢" if change > 0 else "🔴"
-            text += f"""
-{emoji} {name}
-Fiyat: {price}
-Değişim: {change}%
-"""
-
+            text += f"\n{emoji} {name}\nFiyat: {price}\nDeğişim: {change}%\n"
 
     print(text)
     send_telegram(text)
 
-# =====================
-# ÇALIŞTIR
 # =====================
 if __name__ == "__main__":
     send_report()
