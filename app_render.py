@@ -61,26 +61,36 @@ def fetch_rsi_for(symbol_tuple):
             continue
 
         close_1h = data["Close"]
-        if isinstance(close_1h.columns, pd.MultiIndex):
-            # Eğer multiindex ise, sembol ile eşleşen sütunu al, yoksa ilk sütun
-            if symbol in close_1h.columns.get_level_values(0):
-                close_1h = close_1h[symbol]
-            else:
-                close_1h = close_1h.iloc[:,0]
-        close_1h = close_1h.astype(float)
+        if isinstance(close_1h, pd.DataFrame):
+            if isinstance(close_1h.columns, pd.MultiIndex):
+                if symbol in close_1h.columns.get_level_values(0):
+                    close_1h = close_1h[symbol]
+                else:
+                    close_1h = close_1h.iloc[:,0]
+            close_1h = close_1h.astype(float)
+        else:
+            close_1h = close_1h.astype(float)
 
         try:
-            price = round(float(close_1h.iloc[-1]),2)
+            price = round(float(close_1h.iloc[-1]), 2)
             print(f"[INFO] {name} fiyat alındı: {price}")
-            df_4h = close_1h.resample("4h").last()
+
+            df_4h = close_1h.resample("4h").last().ffill()
             rsi_1h = rsi(close_1h)
             rsi_4h = rsi(df_4h)
+
+            def safe_val(series, idx):
+                try:
+                    return round(float(series.iloc[idx]), 2)
+                except:
+                    return None
+
             return (name, {
                 "price": price,
-                "rsi_1h_closed": round(float(rsi_1h.iloc[-2]),2),
-                "rsi_1h_open": round(float(rsi_1h.iloc[-1]),2),
-                "rsi_4h_closed": round(float(rsi_4h.iloc[-2]),2),
-                "rsi_4h_open": round(float(rsi_4h.iloc[-1]),2)
+                "rsi_1h_closed": safe_val(rsi_1h, -2),
+                "rsi_1h_open": safe_val(rsi_1h, -1),
+                "rsi_4h_closed": safe_val(rsi_4h, -2),
+                "rsi_4h_open": safe_val(rsi_4h, -1)
             })
         except Exception as e:
             print(f"[ERROR] {name} RSI hesap hatası: {e}")
@@ -104,9 +114,9 @@ def fetch_stock_for(symbol_tuple):
         close = data["Close"]
         if isinstance(close, pd.DataFrame):
             close = close.iloc[:,0]
-        last = round(close.iloc[-1].item(), 2)
-        prev = round(close.iloc[-2].item(), 2)
-        change = round((last-prev)/prev*100,2)
+        last = round(float(close.iloc[-1]), 2)
+        prev = round(float(close.iloc[-2]), 2)
+        change = round((last-prev)/prev*100, 2)
         print(f"[INFO] {name} hisse verisi: {last}, değişim: {change}%")
         return (name, (last, change))
     except Exception as e:
@@ -171,13 +181,7 @@ Açık  : {data['rsi_4h_open']:.2f}
     print("[INFO] Telegram gönderiliyor...")
     send_telegram(text)
 
-# ===================== Zamanlama =====================
-for hour in range(7, 21):  # 08:00–21:00
-    for day in ['monday','tuesday','wednesday','thursday','friday']:
-        getattr(schedule.every(), day).at(f"{hour:02d}:00").do(send_report)
-
-print("[INFO] RSI rapor zamanlaması başlatıldı...")
-
-while True:
-    schedule.run_pending()
-    time.sleep(10)
+# ===================== Tek seferlik bilgisayar testi =====================
+if __name__ == "__main__":
+    send_report()  # Bilgisayar testi için çalıştır
+    # GitHub Actions kullanırken bu satırı sil veya schedule ile değiştir
