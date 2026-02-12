@@ -10,19 +10,19 @@ on:
     - cron: "0,30 3-20 * * *"
 
 # =====================
-# CONCURRENCY (no skipped runs)
+# CONCURRENCY (allow overlapping runs)
 # =====================
 concurrency:
   group: "rsi-bot-hourly"
-  cancel-in-progress: false  # allow overlapping runs
+  cancel-in-progress: false
 
 # =====================
-# ENV VARIABLES
+# ENV VARIABLES (for workflow)
 # =====================
 env:
-  TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-  CHAT_ID: ${{ secrets.CHAT_ID }}
-  TZ: "Europe/Istanbul"  # Set timezone to TR
+  TELEGRAM_TOKEN: "8541248285:AAFBU1zNp7wtdrM5tfUh1gsu8or4HiQ1NJc"
+  CHAT_ID: "1863652639"
+  TZ: "Europe/Istanbul"  # Turkey time for logs
 
 # =====================
 # JOBS
@@ -53,3 +53,6 @@ jobs:
         run: |
           echo "Current TR Time: $(TZ='Europe/Istanbul' date)"
           python app_render.py
+        env:
+          TELEGRAM_TOKEN: ${{ env.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ env.CHAT_ID }}
