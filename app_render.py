@@ -172,9 +172,9 @@ Açık  : {data['rsi_4h_open']:.2f}
     send_telegram(text)
 
 # ===================== Zamanlama =====================
-for hour in range(8, 22):  # 08:00–21:00
+for hour in range(7, 21):  # 08:00–21:00
     for day in ['monday','tuesday','wednesday','thursday','friday']:
-        getattr(schedule.every(), day).at(f"{hour:02d}:30").do(send_report)
+        getattr(schedule.every(), day).at(f"{hour:02d}:00").do(send_report)
 
 print("[INFO] RSI rapor zamanlaması başlatıldı...")
 
