@@ -3,7 +3,6 @@ import yfinance as yf
 import pandas as pd
 import requests
 from datetime import datetime
-import schedule
 from concurrent.futures import ThreadPoolExecutor
 
 # ===================== TELEGRAM =====================
@@ -38,7 +37,7 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # ===================== Safe download =====================
-def safe_download(symbol, interval="1h", period="7d", retries=3):
+def safe_download(symbol, interval="1h", period="7d", retries=5):
     for i in range(retries):
         try:
             df = yf.download(symbol, interval=interval, period=period, progress=False, threads=False)
@@ -53,23 +52,20 @@ def safe_download(symbol, interval="1h", period="7d", retries=3):
 # ===================== RSI paralel çekim =====================
 def fetch_rsi_for(symbol_tuple):
     name, symbol = symbol_tuple
-    for attempt in range(3):
+    for attempt in range(5):
         data = safe_download(symbol, interval="1h", period="7d")
         if data is None or data.empty:
             print(f"[WARN] {name} verisi boş, {attempt+1}. deneme...")
-            time.sleep(2)
             continue
 
         close_1h = data["Close"]
+        # Series olmasını garanti et
         if isinstance(close_1h, pd.DataFrame):
-            if isinstance(close_1h.columns, pd.MultiIndex):
-                if symbol in close_1h.columns.get_level_values(0):
-                    close_1h = close_1h[symbol]
-                else:
-                    close_1h = close_1h.iloc[:,0]
-            close_1h = close_1h.astype(float)
-        else:
-            close_1h = close_1h.astype(float)
+            close_1h = close_1h.iloc[:,0]
+        close_1h = pd.to_numeric(close_1h, errors='coerce').dropna()
+
+        if close_1h.empty:
+            continue
 
         try:
             price = round(float(close_1h.iloc[-1]), 2)
@@ -80,10 +76,7 @@ def fetch_rsi_for(symbol_tuple):
             rsi_4h = rsi(df_4h)
 
             def safe_val(series, idx):
-                try:
-                    return round(float(series.iloc[idx]), 2)
-                except:
-                    return None
+                return round(float(series.iloc[idx]), 2) if len(series) > abs(idx) else None
 
             return (name, {
                 "price": price,
@@ -107,21 +100,30 @@ def fetch_all_rsi():
 # ===================== Hisse paralel çekim =====================
 def fetch_stock_for(symbol_tuple):
     name, symbol = symbol_tuple
-    data = safe_download(symbol, interval="1d", period="2d")
-    if data is None or data.empty:
-        return (name, (None,None))
-    try:
+    for attempt in range(5):
+        data = safe_download(symbol, interval="1d", period="7d")
+        if data is None or data.empty:
+            print(f"[WARN] {name} verisi boş, {attempt+1}. deneme...")
+            continue
+
         close = data["Close"]
         if isinstance(close, pd.DataFrame):
             close = close.iloc[:,0]
-        last = round(float(close.iloc[-1]), 2)
-        prev = round(float(close.iloc[-2]), 2)
-        change = round((last-prev)/prev*100, 2)
-        print(f"[INFO] {name} hisse verisi: {last}, değişim: {change}%")
-        return (name, (last, change))
-    except Exception as e:
-        print(f"[ERROR] {name} hisse verisi hesap hatası: {e}")
-        return (name, (None,None))
+        close = pd.to_numeric(close, errors='coerce').dropna()
+
+        if len(close) < 2:
+            continue
+
+        try:
+            last = round(float(close.iloc[-1]), 2)
+            prev = round(float(close.iloc[-2]), 2)
+            change = round((last-prev)/prev*100, 2)
+            print(f"[INFO] {name} hisse verisi: {last}, değişim: {change}%")
+            return (name, (last, change))
+        except Exception as e:
+            print(f"[ERROR] {name} hisse verisi hesap hatası ({attempt+1}/5): {e}")
+            time.sleep(1)
+    return (name, (None,None))
 
 def fetch_all_stocks():
     results = {}
@@ -151,12 +153,12 @@ def send_report():
 Fiyat: {data['price']:.2f}
 
 1H RSI
-Kapalı: {data['rsi_1h_closed']:.2f}
-Açık  : {data['rsi_1h_open']:.2f}
+Kapalı: {data['rsi_1h_closed'] if data['rsi_1h_closed'] is not None else 'NA'}
+Açık  : {data['rsi_1h_open'] if data['rsi_1h_open'] is not None else 'NA'}
 
 4H RSI
-Kapalı: {data['rsi_4h_closed']:.2f}
-Açık  : {data['rsi_4h_open']:.2f}
+Kapalı: {data['rsi_4h_closed'] if data['rsi_4h_closed'] is not None else 'NA'}
+Açık  : {data['rsi_4h_open'] if data['rsi_4h_open'] is not None else 'NA'}
 """
 
     text += "\n📈 HİSSE RAPORU (% DEĞİŞİM SIRALI)\n"
@@ -165,11 +167,10 @@ Açık  : {data['rsi_4h_open']:.2f}
     others = [(k,v[0],v[1]) for k,v in stock_data.items() if k!="BIST100"]
     others.sort(key=lambda x: safe_change(x[2]), reverse=True)
 
-    if bist:
+    if bist and bist[0] is not None:
         price, change = bist
-        if price is not None:
-            emoji = "🟢" if change>0 else "🔴"
-            text += f"\n{emoji} BIST100\nFiyat: {price}\nDeğişim: {change}%\n"
+        emoji = "🟢" if change>0 else "🔴"
+        text += f"\n{emoji} BIST100\nFiyat: {price}\nDeğişim: {change}%\n"
 
     for name, price, change in others:
         if price is None:
@@ -180,8 +181,3 @@ Açık  : {data['rsi_4h_open']:.2f}
 
     print("[INFO] Telegram gönderiliyor...")
     send_telegram(text)
-
-# ===================== Tek seferlik bilgisayar testi =====================
-if __name__ == "__main__":
-    send_report()  # Bilgisayar testi için çalıştır
-    # GitHub Actions kullanırken bu satırı sil veya schedule ile değiştir
