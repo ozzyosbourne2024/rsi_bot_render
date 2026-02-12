@@ -36,11 +36,12 @@ def rsi(series, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-# ===================== Safe download =====================
+# ===================== Safe download using Ticker().history =====================
 def safe_download(symbol, interval="1h", period="7d", retries=5):
     for i in range(retries):
         try:
-            df = yf.download(symbol, interval=interval, period=period, progress=False, threads=False)
+            ticker = yf.Ticker(symbol)
+            df = ticker.history(interval=interval, period=period)
             if not df.empty:
                 time.sleep(1)
                 return df
@@ -49,7 +50,7 @@ def safe_download(symbol, interval="1h", period="7d", retries=5):
         time.sleep(2)
     return None
 
-# ===================== RSI paralel çekim =====================
+# ===================== RSI çekim =====================
 def fetch_rsi_for(symbol_tuple):
     name, symbol = symbol_tuple
     for attempt in range(5):
@@ -59,11 +60,7 @@ def fetch_rsi_for(symbol_tuple):
             continue
 
         close_1h = data["Close"]
-        # Series olmasını garanti et
-        if isinstance(close_1h, pd.DataFrame):
-            close_1h = close_1h.iloc[:,0]
         close_1h = pd.to_numeric(close_1h, errors='coerce').dropna()
-
         if close_1h.empty:
             continue
 
@@ -90,14 +87,15 @@ def fetch_rsi_for(symbol_tuple):
             time.sleep(1)
     return (name, None)
 
+# ===================== Paralel RSI çekim =====================
 def fetch_all_rsi():
     results = {}
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        for name, data in executor.map(fetch_rsi_for, SYMBOLS.items()):
-            results[name] = data
+    for symbol_tuple in SYMBOLS.items():   # paralel kaldırıldı, sırayla çekiliyor
+        name, data = fetch_rsi_for(symbol_tuple)
+        results[name] = data
     return results
 
-# ===================== Hisse paralel çekim =====================
+# ===================== Hisse çekim =====================
 def fetch_stock_for(symbol_tuple):
     name, symbol = symbol_tuple
     for attempt in range(5):
@@ -106,11 +104,7 @@ def fetch_stock_for(symbol_tuple):
             print(f"[WARN] {name} verisi boş, {attempt+1}. deneme...")
             continue
 
-        close = data["Close"]
-        if isinstance(close, pd.DataFrame):
-            close = close.iloc[:,0]
-        close = pd.to_numeric(close, errors='coerce').dropna()
-
+        close = pd.to_numeric(data["Close"], errors='coerce').dropna()
         if len(close) < 2:
             continue
 
@@ -127,9 +121,9 @@ def fetch_stock_for(symbol_tuple):
 
 def fetch_all_stocks():
     results = {}
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        for name, data in executor.map(fetch_stock_for, STOCKS.items()):
-            results[name] = data
+    for symbol_tuple in STOCKS.items():   # paralel kaldırıldı
+        name, data = fetch_stock_for(symbol_tuple)
+        results[name] = data
     return results
 
 # ===================== Güvenli sıralama =====================
@@ -181,3 +175,9 @@ Açık  : {data['rsi_4h_open'] if data['rsi_4h_open'] is not None else 'NA'}
 
     print("[INFO] Telegram gönderiliyor...")
     send_telegram(text)
+
+# ====================================
+# Run immediately
+# ====================================
+if __name__ == "__main__":
+    send_report()

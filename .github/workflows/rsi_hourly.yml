@@ -1,58 +1,33 @@
 name: RSI Bot Hourly
 
-# =====================
-# TRIGGER
-# =====================
 on:
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:  # Manuel tetikleme
   schedule:
-    # Every 30 minutes UTC 03:00–20:30 → TR 06:00–23:30
-    - cron: "0,30 3-20 * * *"
+    # UTC 03:00–20:30 arası her yarım saatte bir (Türkiye 06:00–23:30)
+    - cron: '0,30 3-20 * * *'
 
-# =====================
-# CONCURRENCY (allow overlapping runs)
-# =====================
-concurrency:
-  group: "rsi-bot-hourly"
-  cancel-in-progress: false
-
-# =====================
-# ENV VARIABLES (for workflow)
-# =====================
 env:
   TELEGRAM_TOKEN: "8541248285:AAFBU1zNp7wtdrM5tfUh1gsu8or4HiQ1NJc"
   CHAT_ID: "1863652639"
-  TZ: "Europe/Istanbul"  # Turkey time for logs
 
-# =====================
-# JOBS
-# =====================
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-
     steps:
-      # Pull latest code
       - name: Checkout Repo
         uses: actions/checkout@v3
 
-      # Setup Python
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      # Install dependencies
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Run bot
       - name: Run RSI Bot
         run: |
-          echo "Current TR Time: $(TZ='Europe/Istanbul' date)"
+          echo "[INFO] RSI bot başlatılıyor..."
           python app_render.py
-        env:
-          TELEGRAM_TOKEN: ${{ env.TELEGRAM_TOKEN }}
-          CHAT_ID: ${{ env.CHAT_ID }}
