@@ -3,8 +3,8 @@ name: RSI Bot Hourly
 on:
   workflow_dispatch:  # Manuel tetikleme
   schedule:
-    # UTC 03:00–20:30 arası her yarım saatte bir (Türkiye 06:00–23:30)
-    - cron: '0,30 3-20 * * *'
+    # UTC 03:00–20:30 arası her yarım saatte bir (Türkiye 08:00–19:00)
+    - cron: '0,30 5-16 * * *'
 
 env:
   TELEGRAM_TOKEN: "8541248285:AAFBU1zNp7wtdrM5tfUh1gsu8or4HiQ1NJc"
