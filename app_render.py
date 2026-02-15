@@ -23,8 +23,10 @@ SYMBOLS = {"ALTIN":"GC=F","GUMUS":"SI=F","NASDAQ100":"^NDX"}
 STOCKS = {
     "BIST100":"XU100.IS","ASELSAN":"ASELS.IS","BIMAS":"BIMAS.IS","THYAO":"THYAO.IS",
     "TUPRS":"TUPRS.IS","KCHOL":"KCHOL.IS","MIGROS":"MGROS.IS","AKBANK":"AKBNK.IS",
-    "GARANTI":"GARAN.IS","EMLAK_GYO":"EKGYO.IS","ZIRAAT_GYO":"ZRGYO.IS"
+    "EMLAK_GYO":"EKGYO.IS","ZIRAAT_GYO":"ZRGYO.IS","Turk Altin":"TRALT.IS",
+    "PEGASSUS":"PGSUS.IS","VAKIFBANK":"VAKBN.IS","SISECAM":"SISE.IS"
 }
+
 
 # ===================== RSI Hesaplama =====================
 def rsi(series, period=14):
