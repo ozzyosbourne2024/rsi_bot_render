@@ -3,7 +3,6 @@ import yfinance as yf
 import pandas as pd
 import requests
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
 
 # ===================== TELEGRAM =====================
 TELEGRAM_TOKEN = "8541248285:AAFBU1zNp7wtdrM5tfUh1gsu8or4HiQ1NJc"
@@ -14,9 +13,8 @@ def send_telegram(message):
     payload = {"chat_id": CHAT_ID, "text": message}
     try:
         requests.post(url, data=payload, timeout=10)
-        print("[INFO] Telegram gönderildi.")
     except Exception as e:
-        print("[ERROR] Telegram gönderim hatası:", e)
+        print("Telegram error:", e)
 
 # ===================== Semboller ve Hisseler =====================
 SYMBOLS = {"ALTIN":"GC=F","GUMUS":"SI=F","NASDAQ100":"^NDX"}
@@ -26,7 +24,6 @@ STOCKS = {
     "EMLAK_GYO":"EKGYO.IS","ZIRAAT_GYO":"ZRGYO.IS","Turk Altin":"TRALT.IS",
     "PEGASSUS":"PGSUS.IS","VAKIFBANK":"VAKBN.IS","SISECAM":"SISE.IS","CVK MADEN":"CVKMD.IS"
 }
-
 
 # ===================== RSI Hesaplama =====================
 def rsi(series, period=14):
@@ -38,37 +35,34 @@ def rsi(series, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-# ===================== Safe download using Ticker().history =====================
+# ===================== Safe download =====================
 def safe_download(symbol, interval="1h", period="7d", retries=5):
-    for i in range(retries):
+    for _ in range(retries):
         try:
             ticker = yf.Ticker(symbol)
             df = ticker.history(interval=interval, period=period)
             if not df.empty:
                 time.sleep(1)
                 return df
-        except Exception as e:
-            print(f"[ERROR] {symbol} download hatası ({i+1}/{retries}): {e}")
+        except:
+            pass
         time.sleep(2)
     return None
 
 # ===================== RSI çekim =====================
 def fetch_rsi_for(symbol_tuple):
     name, symbol = symbol_tuple
-    for attempt in range(5):
+    for _ in range(5):
         data = safe_download(symbol, interval="1h", period="7d")
         if data is None or data.empty:
-            print(f"[WARN] {name} verisi boş, {attempt+1}. deneme...")
             continue
 
-        close_1h = data["Close"]
-        close_1h = pd.to_numeric(close_1h, errors='coerce').dropna()
+        close_1h = pd.to_numeric(data["Close"], errors='coerce').dropna()
         if close_1h.empty:
             continue
 
         try:
             price = round(float(close_1h.iloc[-1]), 2)
-            print(f"[INFO] {name} fiyat alındı: {price}")
 
             df_4h = close_1h.resample("4h").last().ffill()
             rsi_1h = rsi(close_1h)
@@ -84,15 +78,13 @@ def fetch_rsi_for(symbol_tuple):
                 "rsi_4h_closed": safe_val(rsi_4h, -2),
                 "rsi_4h_open": safe_val(rsi_4h, -1)
             })
-        except Exception as e:
-            print(f"[ERROR] {name} RSI hesap hatası: {e}")
+        except:
             time.sleep(1)
     return (name, None)
 
-# ===================== Paralel RSI çekim =====================
 def fetch_all_rsi():
     results = {}
-    for symbol_tuple in SYMBOLS.items():   # paralel kaldırıldı, sırayla çekiliyor
+    for symbol_tuple in SYMBOLS.items():
         name, data = fetch_rsi_for(symbol_tuple)
         results[name] = data
     return results
@@ -100,10 +92,9 @@ def fetch_all_rsi():
 # ===================== Hisse çekim =====================
 def fetch_stock_for(symbol_tuple):
     name, symbol = symbol_tuple
-    for attempt in range(5):
+    for _ in range(5):
         data = safe_download(symbol, interval="1d", period="7d")
         if data is None or data.empty:
-            print(f"[WARN] {name} verisi boş, {attempt+1}. deneme...")
             continue
 
         close = pd.to_numeric(data["Close"], errors='coerce').dropna()
@@ -114,39 +105,69 @@ def fetch_stock_for(symbol_tuple):
             last = round(float(close.iloc[-1]), 2)
             prev = round(float(close.iloc[-2]), 2)
             change = round((last-prev)/prev*100, 2)
-            print(f"[INFO] {name} hisse verisi: {last}, değişim: {change}%")
             return (name, (last, change))
-        except Exception as e:
-            print(f"[ERROR] {name} hisse verisi hesap hatası ({attempt+1}/5): {e}")
+        except:
             time.sleep(1)
     return (name, (None,None))
 
 def fetch_all_stocks():
     results = {}
-    for symbol_tuple in STOCKS.items():   # paralel kaldırıldı
+    for symbol_tuple in STOCKS.items():
         name, data = fetch_stock_for(symbol_tuple)
         results[name] = data
     return results
 
-# ===================== Güvenli sıralama =====================
 def safe_change(val):
-    if val is None:
-        return -9999
-    return float(val)
+    return float(val) if val is not None else -9999
 
-# ===================== Rapor oluşturma =====================
+# ===================== Spot Prices =====================
+def get_spot_prices():
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    silver_spot = None
+    gold_spot = None
+
+    try:
+        r = requests.get("https://api.gold-api.com/price/XAG", headers=headers, timeout=5)
+        if r.status_code == 200:
+            silver_spot = r.json().get("price")
+    except:
+        pass
+
+    try:
+        r = requests.get("https://api.gold-api.com/price/XAU", headers=headers, timeout=5)
+        if r.status_code == 200:
+            gold_spot = r.json().get("price")
+    except:
+        pass
+
+    return silver_spot, gold_spot
+
+# ===================== Rapor =====================
 def send_report():
     now = datetime.now().strftime("%H:%M TR")
     text = f"📊 RSI RAPOR | {now}\n"
 
     rsi_data = fetch_all_rsi()
+    silver_spot, gold_spot = get_spot_prices()
+
     for name in SYMBOLS.keys():
         data = rsi_data.get(name)
+
         if not data:
             text += f"\n{name}: Veri alınamadı!\n"
             continue
-        text += f"""{name}
-Fiyat: {data['price']:.2f}
+
+        if name == "GUMUS" and silver_spot:
+            price_line = f"{data['price']:.2f} / {silver_spot:.2f}"
+        elif name == "ALTIN" and gold_spot:
+            price_line = f"{data['price']:.2f} / {gold_spot:.2f}"
+        else:
+            price_line = f"{data['price']:.2f}"
+
+        text += f"""
+{name}
+Fiyat: {price_line}
 
 1H RSI
 Kapalı: {data['rsi_1h_closed'] if data['rsi_1h_closed'] is not None else 'NA'}
@@ -158,28 +179,25 @@ Açık  : {data['rsi_4h_open'] if data['rsi_4h_open'] is not None else 'NA'}
 """
 
     text += "\n📈 HİSSE RAPORU (% DEĞİŞİM SIRALI)\n"
+
     stock_data = fetch_all_stocks()
     bist = stock_data.get("BIST100")
-    others = [(k,v[0],v[1]) for k,v in stock_data.items() if k!="BIST100"]
+    others = [(k, v[0], v[1]) for k, v in stock_data.items() if k != "BIST100"]
     others.sort(key=lambda x: safe_change(x[2]), reverse=True)
 
     if bist and bist[0] is not None:
         price, change = bist
-        emoji = "🟢" if change>0 else "🔴"
+        emoji = "🟢" if change > 0 else "🔴"
         text += f"\n{emoji} BIST100\nFiyat: {price}\nDeğişim: {change}%\n"
 
     for name, price, change in others:
         if price is None:
             text += f"\n{name}: Veri alınamadı\n"
         else:
-            emoji = "🟢" if change>0 else "🔴"
+            emoji = "🟢" if change > 0 else "🔴"
             text += f"\n{emoji} {name}\nFiyat: {price}\nDeğişim: {change}%\n"
 
-    print("[INFO] Telegram gönderiliyor...")
     send_telegram(text)
 
-# ====================================
-# Run immediately
-# ====================================
 if __name__ == "__main__":
     send_report()
